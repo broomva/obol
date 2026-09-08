@@ -33,6 +33,29 @@ supported route for daemon-local work from a server handler. A reload that fails
 is reported per agent; the binding itself has already been saved, so the agent
 picks it up the next time its session opens either way.
 
+### The conversation has to travel with the agent
+
+`CLAUDE_CONFIG_DIR` scopes the credential store **and** the conversation store.
+Swapping a live agent therefore moves its credentials and orphans its history:
+the reopened session resumes by session id, and that id is a `.jsonl` file under
+the account it came from. Measured, before this was handled:
+
+```
+[obol] bound claude -> claude-beta (refresh, keys: CLAUDE_CONFIG_DIR)
+Claude Code returned an error result:
+  No conversation found with session ID: a882dcb9-0767-41f4-965c-a12d678b7224
+
+$ grep -rl a882dcb9 .claude-alpha .claude-beta
+.claude-alpha/projects/-private-tmp-obol-demo/a882dcb9-....jsonl
+```
+
+So before reloading an agent, Obol mirrors that agent's conversation into the
+target account (`server/history.ts`). The copy only ever adds files: the source
+account is never modified, and an existing target file is replaced only by a
+strictly newer source. The `projects/<dir>` name is computed with the same
+encoding Paseo uses (`packages/server/src/server/agent/providers/claude/
+project-dir.ts`), so both land on the same directory.
+
 ### Switching clears the other account's variables
 
 If one account sets two variables and the account replacing it sets one, the

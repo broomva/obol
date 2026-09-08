@@ -9,6 +9,7 @@ export interface AgentLike {
   id: string;
   provider: string;
   status: string;
+  cwd?: string;
   title?: string | null;
   archivedAt?: string | null;
   lastUsage?: {

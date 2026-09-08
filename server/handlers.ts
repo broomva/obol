@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { RpcInput } from "@getpaseo/plugin";
 import type { listAccounts, selectAccount, usageSnapshot } from "../shared/contracts";
+import { mirrorClaudeHistory } from "./history";
 import { type AgentLike, activeAgents, rollupByProvider, toLastTurnEntry, totalsOf } from "./ledger";
 import { findActiveAccount } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
@@ -57,7 +58,28 @@ export async function handleSelectAccount(
     const affected = activeAgents(result.entries as AgentLike[]).filter(
       (agent) => agent.provider === provider,
     );
+    // The account we are leaving, resolved before the save above took effect.
+    const previous = state.active[provider];
+    const previousAccount = state.accounts.find(
+      (candidate) => candidate.id === previous && candidate.provider === provider,
+    );
+
     for (const agent of affected) {
+      // Carry the conversation across first: the reopened session resumes by
+      // session id, and that id is a file inside the account's config dir.
+      const from = previousAccount?.env.CLAUDE_CONFIG_DIR;
+      const to = account.env.CLAUDE_CONFIG_DIR;
+      if (from && to && agent.cwd) {
+        try {
+          await mirrorClaudeHistory({ fromConfigDir: from, toConfigDir: to, cwd: agent.cwd });
+        } catch (error) {
+          reloadErrors.push({
+            agentId: agent.id,
+            error: `history mirror failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+          continue;
+        }
+      }
       const error = await reloadAgent(agent.id);
       if (error) reloadErrors.push({ agentId: agent.id, error });
       else reloadedAgentIds.push(agent.id);
