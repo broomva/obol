@@ -56,6 +56,16 @@ strictly newer source. The `projects/<dir>` name is computed with the same
 encoding Paseo uses (`packages/server/src/server/agent/providers/claude/
 project-dir.ts`), so both land on the same directory.
 
+**The order matters.** Copying the conversation into a session that is already
+open does nothing — the provider resolves its history when the session opens.
+Mirroring after a reload leaves the same error in place; mirroring before it
+lets the same agent resume:
+
+```
+mirror → reload → send   {"status":"completed"}
+reload → mirror → send   {"status":"error","message":"No conversation found..."}
+```
+
 ### Switching clears the other account's variables
 
 If one account sets two variables and the account replacing it sets one, the
