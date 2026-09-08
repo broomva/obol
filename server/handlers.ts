@@ -1,0 +1,144 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import type { RpcInput } from "@getpaseo/plugin";
+import type { listAccounts, selectAccount, usageSnapshot } from "../shared/contracts";
+import { type AgentLike, activeAgents, rollupByProvider, toLastTurnEntry, totalsOf } from "./ledger";
+import { findActiveAccount } from "./routing";
+import { loadStateWithDiscovery, saveState, statePath } from "./state";
+
+const run = promisify(execFile);
+
+/** Anything with the Paseo SDK surface this plugin touches. */
+interface PaseoLike {
+  agents: { list(options?: Record<string, unknown>): Promise<{ entries: unknown[] }> };
+  providers: { listUsage(): Promise<{ providers?: unknown[]; usage?: unknown[] }> };
+}
+
+export async function handleListAccounts(_input: RpcInput<typeof listAccounts>) {
+  const state = await loadStateWithDiscovery();
+  return { accounts: state.accounts, active: state.active, statePath: statePath() };
+}
+
+/**
+ * The plugin SDK's `agent.refresh()` is a data refetch, not a session reopen —
+ * the reopen lives behind the daemon's agent-reload RPC, which the bundled CLI
+ * exposes as `paseo agent reload`. Shelling out is the supported path for
+ * daemon-local work from a server handler; a failure is reported per agent
+ * rather than failing the whole swap, because the binding itself already stuck.
+ */
+async function reloadAgent(agentId: string): Promise<string | null> {
+  try {
+    await run("paseo", ["agent", "reload", agentId, "--json"], { timeout: 60_000 });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+export async function handleSelectAccount(
+  { provider, accountId, reloadAgents }: RpcInput<typeof selectAccount>,
+  context: { paseo: PaseoLike },
+) {
+  const state = await loadStateWithDiscovery();
+  const account = state.accounts.find(
+    (candidate) => candidate.id === accountId && candidate.provider === provider,
+  );
+  if (!account) {
+    throw new Error(`No account '${accountId}' is configured for provider '${provider}'`);
+  }
+
+  await saveState({ accounts: state.accounts, active: { ...state.active, [provider]: accountId } });
+
+  const reloadedAgentIds: string[] = [];
+  const reloadErrors: { agentId: string; error: string }[] = [];
+
+  if (reloadAgents) {
+    const result = await context.paseo.agents.list({});
+    const affected = activeAgents(result.entries as AgentLike[]).filter(
+      (agent) => agent.provider === provider,
+    );
+    for (const agent of affected) {
+      const error = await reloadAgent(agent.id);
+      if (error) reloadErrors.push({ agentId: agent.id, error });
+      else reloadedAgentIds.push(agent.id);
+    }
+  }
+
+  return { provider, accountId, reloadedAgentIds, reloadErrors };
+}
+
+interface RawQuota {
+  providerId?: unknown;
+  displayName?: unknown;
+  status?: unknown;
+  planLabel?: unknown;
+  error?: unknown;
+  windows?: unknown;
+}
+
+function text(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function nullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeQuota(raw: RawQuota, boundAccountId: string | null) {
+  const windows = Array.isArray(raw.windows) ? raw.windows : [];
+  return {
+    providerId: text(raw.providerId, "unknown"),
+    displayName: text(raw.displayName, text(raw.providerId, "unknown")),
+    status: text(raw.status, "unknown"),
+    planLabel: nullableText(raw.planLabel),
+    boundAccountId,
+    windows: windows.map((entry) => {
+      const window = entry as Record<string, unknown>;
+      return {
+        id: text(window.id, "window"),
+        label: text(window.label, text(window.id, "window")),
+        usedPct: nullableNumber(window.usedPct),
+        resetsAt: nullableText(window.resetsAt),
+        tone: nullableText(window.tone),
+      };
+    }),
+    error: nullableText(raw.error),
+  };
+}
+
+export async function handleUsageSnapshot(
+  _input: RpcInput<typeof usageSnapshot>,
+  context: { paseo: PaseoLike },
+) {
+  const state = await loadStateWithDiscovery();
+
+  let quotas: ReturnType<typeof normalizeQuota>[] = [];
+  let quotaError: string | null = null;
+  try {
+    const usage = await context.paseo.providers.listUsage();
+    const rows = (usage.providers ?? usage.usage ?? []) as RawQuota[];
+    quotas = rows.map((row) => {
+      const providerId = text(row.providerId, "unknown");
+      const bound = findActiveAccount(state, providerId);
+      return normalizeQuota(row, bound?.id ?? null);
+    });
+  } catch (error) {
+    quotaError = error instanceof Error ? error.message : String(error);
+  }
+
+  const result = await context.paseo.agents.list({});
+  const lastTurns = activeAgents(result.entries as AgentLike[]).map(toLastTurnEntry);
+
+  return {
+    capturedAt: new Date().toISOString(),
+    quotas,
+    quotaError,
+    lastTurns,
+    byProvider: rollupByProvider(lastTurns),
+    totals: totalsOf(lastTurns),
+  };
+}
