@@ -155,6 +155,9 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
             {swap.data && swap.data.provider === provider ? (
               <Text style={styles.muted}>
                 Reloaded {swap.data.reloadedAgentIds.length} agent(s)
+                {swap.data.deferredAgentIds.length > 0
+                  ? `, ${swap.data.deferredAgentIds.length} mid-turn deferred to next open`
+                  : ""}
                 {swap.data.reloadErrors.length > 0
                   ? `, ${swap.data.reloadErrors.length} failed`
                   : ""}

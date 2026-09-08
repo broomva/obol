@@ -53,6 +53,8 @@ export const selectAccount = defineRpc({
     provider: z.string(),
     accountId: z.string(),
     reloadedAgentIds: z.array(z.string()),
+    /** Mid-turn agents left alone; they pick the binding up on their next open. */
+    deferredAgentIds: z.array(z.string()),
     reloadErrors: z.array(z.object({ agentId: z.string(), error: z.string() })),
   }),
 });

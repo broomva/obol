@@ -4,6 +4,7 @@ import type { RpcInput } from "@getpaseo/plugin";
 import type { listAccounts, selectAccount, usageSnapshot } from "../shared/contracts";
 import { mirrorClaudeHistory } from "./history";
 import { type AgentLike, activeAgents, rollupByProvider, toLastTurnEntry, totalsOf } from "./ledger";
+import { planAgentReloads } from "./reload-plan";
 import { findActiveAccount } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
 
@@ -12,7 +13,8 @@ const run = promisify(execFile);
 /** Anything with the Paseo SDK surface this plugin touches. */
 interface PaseoLike {
   agents: { list(options?: Record<string, unknown>): Promise<{ entries: unknown[] }> };
-  providers: { listUsage(): Promise<{ providers?: unknown[]; usage?: unknown[] }> };
+  // provider.usage.list.response payload: { requestId, fetchedAt, providers }
+  providers: { listUsage(): Promise<{ fetchedAt?: string; providers: unknown[] }> };
 }
 
 export async function handleListAccounts(_input: RpcInput<typeof listAccounts>) {
@@ -51,13 +53,16 @@ export async function handleSelectAccount(
   await saveState({ accounts: state.accounts, active: { ...state.active, [provider]: accountId } });
 
   const reloadedAgentIds: string[] = [];
+  const deferredAgentIds: string[] = [];
   const reloadErrors: { agentId: string; error: string }[] = [];
 
   if (reloadAgents) {
     const result = await context.paseo.agents.list({});
-    const affected = activeAgents(result.entries as AgentLike[]).filter(
-      (agent) => agent.provider === provider,
-    );
+    const entries = result.entries as AgentLike[];
+    const plan = planAgentReloads(entries, provider);
+    deferredAgentIds.push(...plan.defer);
+    const byId = new Map(entries.map((agent) => [agent.id, agent]));
+    const affected = plan.reload.map((id) => byId.get(id)).filter((a): a is AgentLike => !!a);
     // The account we are leaving, resolved before the save above took effect.
     const previous = state.active[provider];
     const previousAccount = state.accounts.find(
@@ -86,7 +91,7 @@ export async function handleSelectAccount(
     }
   }
 
-  return { provider, accountId, reloadedAgentIds, reloadErrors };
+  return { provider, accountId, reloadedAgentIds, deferredAgentIds, reloadErrors };
 }
 
 interface RawQuota {
@@ -142,7 +147,7 @@ export async function handleUsageSnapshot(
   let quotaError: string | null = null;
   try {
     const usage = await context.paseo.providers.listUsage();
-    const rows = (usage.providers ?? usage.usage ?? []) as RawQuota[];
+    const rows = usage.providers as RawQuota[];
     quotas = rows.map((row) => {
       const providerId = text(row.providerId, "unknown");
       const bound = findActiveAccount(state, providerId);
