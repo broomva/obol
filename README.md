@@ -33,6 +33,16 @@ supported route for daemon-local work from a server handler. A reload that fails
 is reported per agent; the binding itself has already been saved, so the agent
 picks it up the next time its session opens either way.
 
+### A swap never interrupts a turn in flight
+
+Reloading closes and reopens the provider session, and Paseo interrupts a
+running turn to do it (`interruptAgentIfRunning` in `session.ts`). On a daemon
+with live work that would destroy a turn — including, on your own machine, the
+agent that may be driving the swap. So a swap reloads only agents that are not
+mid-turn and reports the rest as **deferred**. Deferring costs nothing: the
+router is re-consulted on every session open, so a busy agent picks the new
+binding up as soon as its session next opens.
+
 ### The conversation has to travel with the agent
 
 `CLAUDE_CONFIG_DIR` scopes the credential store **and** the conversation store.
