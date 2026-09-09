@@ -31,7 +31,7 @@ export function toLastTurnEntry(agent: AgentLike): LastTurnEntry {
   const usage = agent.lastUsage ?? {};
   return {
     agentId: agent.id,
-    label: agent.title?.trim() ? agent.title.trim() : agent.id.slice(0, 8),
+    label: agent.title?.trim() ? agent.title.trim() : (agent.id ?? "unknown").slice(0, 8),
     provider: agent.provider,
     status: agent.status,
     inputTokens: usage.inputTokens ?? 0,
@@ -81,6 +81,24 @@ export function totalsOf(entries: LastTurnEntry[]) {
     outputTokens: entries.reduce((total, entry) => total + entry.outputTokens, 0),
     costUsd: sumCost(entries),
   };
+}
+
+/**
+ * `agents.list()` returns directory ENTRIES, not snapshots: each row is
+ * `{ agent, project, ... }` (AgentDirectoryResponseEntrySchema in
+ * packages/protocol/src/messages.ts:3985). Casting the entry to an agent yields
+ * `undefined` for every field and the first property read throws, which is what
+ * shipped until the RPC was invoked for real. Unwrap explicitly, and drop rows
+ * that carry no usable agent rather than letting one bad row kill the panel.
+ */
+export function agentsFromEntries(entries: readonly unknown[]): AgentLike[] {
+  const agents: AgentLike[] = [];
+  for (const entry of entries) {
+    const candidate = (entry as { agent?: unknown } | null)?.agent as AgentLike | undefined;
+    if (!candidate || typeof candidate.id !== "string") continue;
+    agents.push(candidate);
+  }
+  return agents;
 }
 
 /** Archived agents are excluded: they cannot spend anything further. */

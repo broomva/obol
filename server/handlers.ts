@@ -3,7 +3,14 @@ import { promisify } from "node:util";
 import type { RpcInput } from "@getpaseo/plugin";
 import type { listAccounts, selectAccount, usageSnapshot } from "../shared/contracts";
 import { mirrorClaudeHistory } from "./history";
-import { type AgentLike, activeAgents, rollupByProvider, toLastTurnEntry, totalsOf } from "./ledger";
+import {
+  type AgentLike,
+  activeAgents,
+  agentsFromEntries,
+  rollupByProvider,
+  toLastTurnEntry,
+  totalsOf,
+} from "./ledger";
 import { planAgentReloads } from "./reload-plan";
 import { findActiveAccount } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
@@ -58,7 +65,7 @@ export async function handleSelectAccount(
 
   if (reloadAgents) {
     const result = await context.paseo.agents.list({});
-    const entries = result.entries as AgentLike[];
+    const entries = agentsFromEntries(result.entries);
     const plan = planAgentReloads(entries, provider);
     deferredAgentIds.push(...plan.defer);
     const byId = new Map(entries.map((agent) => [agent.id, agent]));
@@ -158,7 +165,7 @@ export async function handleUsageSnapshot(
   }
 
   const result = await context.paseo.agents.list({});
-  const lastTurns = activeAgents(result.entries as AgentLike[]).map(toLastTurnEntry);
+  const lastTurns = activeAgents(agentsFromEntries(result.entries)).map(toLastTurnEntry);
 
   return {
     capturedAt: new Date().toISOString(),

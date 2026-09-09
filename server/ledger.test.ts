@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { type AgentLike, activeAgents, rollupByProvider, toLastTurnEntry, totalsOf } from "./ledger";
+import {
+  type AgentLike,
+  activeAgents,
+  agentsFromEntries,
+  rollupByProvider,
+  toLastTurnEntry,
+  totalsOf,
+} from "./ledger";
 
 function agent(overrides: Partial<AgentLike> & { id: string }): AgentLike {
   return { provider: "claude", status: "idle", ...overrides };
@@ -105,5 +112,40 @@ describe("totalsOf", () => {
       outputTokens: 33,
       costUsd: null,
     });
+  });
+});
+
+describe("agentsFromEntries", () => {
+  // agents.list() rows are { agent, project, ... }. Casting the row to an agent
+  // yielded undefined fields and the first property read threw at runtime,
+  // which every hand-made fixture in this file had hidden.
+  it("unwraps the nested agent snapshot from a directory entry", () => {
+    const entries = [
+      { agent: { id: "a1", provider: "claude", status: "idle" }, project: { id: "p" } },
+      { agent: { id: "a2", provider: "codex", status: "running" }, project: { id: "p" } },
+    ];
+    expect(agentsFromEntries(entries).map((a) => a.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("drops rows with no usable agent instead of throwing", () => {
+    const entries = [
+      { project: { id: "p" } },
+      null,
+      { agent: null },
+      { agent: { provider: "claude", status: "idle" } },
+      { agent: { id: "good", provider: "claude", status: "idle" } },
+    ];
+    expect(agentsFromEntries(entries).map((a) => a.id)).toEqual(["good"]);
+  });
+
+  it("survives an entry that is not an object at all", () => {
+    expect(agentsFromEntries(["nope", 7, undefined])).toEqual([]);
+  });
+});
+
+describe("toLastTurnEntry label fallback", () => {
+  it("does not throw when a snapshot arrives without an id", () => {
+    const entry = toLastTurnEntry({ provider: "claude", status: "idle" } as AgentLike);
+    expect(entry.label).toBe("unknown");
   });
 });
