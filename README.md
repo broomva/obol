@@ -33,6 +33,36 @@ supported route for daemon-local work from a server handler. A reload that fails
 is reported per agent; the binding itself has already been saved, so the agent
 picks it up the next time its session opens either way.
 
+### Scope: fleet, workspace, or one agent
+
+A binding is resolved most-specific-first — the agent's own, then its
+workspace's, then the fleet-wide provider default. Because Obol never rewrites a
+shared credential store, nothing forces the fleet to move together: three agents
+can sit on the work subscription while three others sit on personal, at the same
+time.
+
+That also decides what a swap reloads. The plan compares each agent's
+**effective** account before and after the change and reloads only the ones that
+actually moved, so changing the fleet default leaves a pinned agent alone —
+its subscription did not change, and reopening its session would cost a turn and
+buy nothing. Measured on a live daemon:
+
+```
+create              [obol] bound claude -> claude-alpha via provider (create)
+pin agent -> beta   reloaded 1
+                    [obol] bound claude -> claude-beta via agent (refresh)
+fleet default -> alpha   reloaded 0      # the pinned agent stayed put
+```
+
+Pin one agent from its composer:
+
+```
+/obol claude-personal
+```
+
+A binding that names an account which no longer exists falls through to the next
+scope rather than stranding the session unbound.
+
 ### A swap never interrupts a turn in flight
 
 Reloading closes and reopens the provider session, and Paseo interrupts a
