@@ -175,6 +175,30 @@ Two limits worth knowing before you read a number off the screen:
 A cost that no agent reported reads `not reported`, never `$0.00`. An absent
 number is unknown, and unknown is not zero.
 
+## Requires Paseo 0.8
+
+Obol is a 0.8 plugin and there is no 0.7 version of it to write. The mechanism it
+is built on — `server.before("agent.session_open")`, which rewrites a session's
+launch environment — was **added in 0.8.0-beta.1** (#4435), along with slash
+commands and the split `index.client` / `index.server` entry format. None of
+those exist in 0.7.x.
+
+On a 0.7 daemon the install fails while parsing the manifest, because
+`requirements` is itself a 0.8 key:
+
+```
+Request failed: [{ "code": "unrecognized_keys", "keys": ["requirements"],
+  "message": "Unrecognized key: \"requirements\"" }]
+  requestType=plugin.directory.install.request
+```
+
+Removing that key does not help — it only moves the failure to the entry format.
+
+At the time of writing 0.8.0 has not reached stable; `v0.8.0-beta.1` is a
+pre-release and `v0.7.2` is `Latest`. To run Obol today, join the beta channel:
+**Settings → About → Release channel → Beta**. It is reversible — switching back
+to stable installs the next stable update normally.
+
 ## Install
 
 ```bash
