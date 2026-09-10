@@ -12,7 +12,7 @@ import {
   totalsOf,
 } from "./ledger";
 import { planAgentReloads } from "./reload-plan";
-import { findActiveAccount } from "./routing";
+import { findActiveAccount, resolveAccountFor, upsertBinding } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
 
 const run = promisify(execFile);
@@ -26,7 +26,12 @@ interface PaseoLike {
 
 export async function handleListAccounts(_input: RpcInput<typeof listAccounts>) {
   const state = await loadStateWithDiscovery();
-  return { accounts: state.accounts, active: state.active, statePath: statePath() };
+  return {
+    accounts: state.accounts,
+    active: state.active,
+    bindings: state.bindings,
+    statePath: statePath(),
+  };
 }
 
 /**
@@ -46,18 +51,25 @@ async function reloadAgent(agentId: string): Promise<string | null> {
 }
 
 export async function handleSelectAccount(
-  { provider, accountId, reloadAgents }: RpcInput<typeof selectAccount>,
+  { provider, accountId, scope, key, reloadAgents }: RpcInput<typeof selectAccount>,
   context: { paseo: PaseoLike },
 ) {
-  const state = await loadStateWithDiscovery();
-  const account = state.accounts.find(
+  const before = await loadStateWithDiscovery();
+  const account = before.accounts.find(
     (candidate) => candidate.id === accountId && candidate.provider === provider,
   );
   if (!account) {
     throw new Error(`No account '${accountId}' is configured for provider '${provider}'`);
   }
+  if (scope !== "provider" && !key) {
+    throw new Error(`A '${scope}' binding needs the ${scope} id in 'key'`);
+  }
 
-  await saveState({ accounts: state.accounts, active: { ...state.active, [provider]: accountId } });
+  const after =
+    scope === "provider"
+      ? { ...before, active: { ...before.active, [provider]: accountId } }
+      : upsertBinding(before, { scope, key: key as string, provider, accountId });
+  await saveState(after);
 
   const reloadedAgentIds: string[] = [];
   const deferredAgentIds: string[] = [];
@@ -65,21 +77,21 @@ export async function handleSelectAccount(
 
   if (reloadAgents) {
     const result = await context.paseo.agents.list({});
-    const entries = agentsFromEntries(result.entries);
-    const plan = planAgentReloads(entries, provider);
+    const agents = agentsFromEntries(result.entries);
+    const plan = planAgentReloads(agents, before, after);
     deferredAgentIds.push(...plan.defer);
-    const byId = new Map(entries.map((agent) => [agent.id, agent]));
-    const affected = plan.reload.map((id) => byId.get(id)).filter((a): a is AgentLike => !!a);
-    // The account we are leaving, resolved before the save above took effect.
-    const previous = state.active[provider];
-    const previousAccount = state.accounts.find(
-      (candidate) => candidate.id === previous && candidate.provider === provider,
-    );
+    const byId = new Map(agents.map((agent) => [agent.id, agent]));
 
-    for (const agent of affected) {
+    for (const agentId of plan.reload) {
+      const agent = byId.get(agentId);
+      if (!agent) continue;
       // Carry the conversation across first: the reopened session resumes by
       // session id, and that id is a file inside the account's config dir.
-      const from = previousAccount?.env.CLAUDE_CONFIG_DIR;
+      const from = resolveAccountFor(before, {
+        provider,
+        agentId: agent.id,
+        workspaceId: agent.workspaceId ?? null,
+      })?.account.env.CLAUDE_CONFIG_DIR;
       const to = account.env.CLAUDE_CONFIG_DIR;
       if (from && to && agent.cwd) {
         try {
@@ -98,7 +110,15 @@ export async function handleSelectAccount(
     }
   }
 
-  return { provider, accountId, reloadedAgentIds, deferredAgentIds, reloadErrors };
+  return {
+    provider,
+    accountId,
+    scope,
+    key: key ?? null,
+    reloadedAgentIds,
+    deferredAgentIds,
+    reloadErrors,
+  };
 }
 
 interface RawQuota {

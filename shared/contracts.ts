@@ -19,12 +19,34 @@ export const AccountSchema = z.object({
 });
 export type Account = z.infer<typeof AccountSchema>;
 
+/**
+ * A binding narrower than the provider default. Orca's switch is one global
+ * choice because it rewrites one shared credential store; Obol points each
+ * process at a different store, so nothing forces the whole fleet to move
+ * together. That makes a fleet of agents on several subscriptions at once
+ * expressible, which is the case a single global switch cannot represent.
+ */
+export const ScopedBindingSchema = z.object({
+  scope: z.enum(["workspace", "agent"]),
+  /** The workspace id or agent id this binding applies to. */
+  key: z.string().min(1),
+  provider: z.string().min(1),
+  accountId: z.string().min(1),
+});
+export type ScopedBinding = z.infer<typeof ScopedBindingSchema>;
+
 export const RouterStateSchema = z.object({
   accounts: z.array(AccountSchema),
-  /** provider id -> account id currently bound to it. */
+  /** provider id -> account id; the default when nothing narrower matches. */
   active: z.record(z.string(), z.string()),
+  /** Overrides, most specific first at resolution: agent, then workspace. */
+  bindings: z.array(ScopedBindingSchema).default([]),
 });
 export type RouterState = z.infer<typeof RouterStateSchema>;
+
+/** Where a binding applies. `provider` is the fleet-wide default. */
+export const BindingScopeSchema = z.enum(["provider", "workspace", "agent"]);
+export type BindingScope = z.infer<typeof BindingScopeSchema>;
 
 export const listAccounts = defineRpc({
   name: "obol.accounts.list",
@@ -32,6 +54,7 @@ export const listAccounts = defineRpc({
   output: z.object({
     accounts: z.array(AccountSchema),
     active: z.record(z.string(), z.string()),
+    bindings: z.array(ScopedBindingSchema),
     statePath: z.string(),
   }),
 });
@@ -47,11 +70,17 @@ export const selectAccount = defineRpc({
   input: z.object({
     provider: z.string().min(1),
     accountId: z.string().min(1),
+    /** Defaults to the fleet-wide provider default. */
+    scope: BindingScopeSchema.default("provider"),
+    /** Required for `workspace` and `agent`: the id the binding applies to. */
+    key: z.string().min(1).optional(),
     reloadAgents: z.boolean().default(false),
   }),
   output: z.object({
     provider: z.string(),
     accountId: z.string(),
+    scope: BindingScopeSchema,
+    key: z.string().nullable(),
     reloadedAgentIds: z.array(z.string()),
     /** Mid-turn agents left alone; they pick the binding up on their next open. */
     deferredAgentIds: z.array(z.string()),

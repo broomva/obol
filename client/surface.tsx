@@ -102,8 +102,9 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
       <View style={{ gap: 4 }}>
         <Text style={styles.heading}>Subscriptions</Text>
         <Text style={styles.caption}>
-          Binding a provider rewrites its launch environment on every session open. Swap reloads live
-          agents so they reopen on the selected account.
+          Binding rewrites the provider's launch environment on every session open, and reloads live
+          agents so they reopen on the selected account. A chip sets the fleet default; the /obol
+          slash command with an account id pins one agent alone.
         </Text>
       </View>
 
@@ -127,7 +128,7 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
           <View key={provider} style={styles.card}>
             <View style={styles.rowBetween}>
               <Text style={styles.label}>{provider}</Text>
-              <Text style={styles.muted}>{active ? `bound: ${active}` : "daemon default"}</Text>
+              <Text style={styles.muted}>{active ? `fleet default: ${active}` : "daemon default"}</Text>
             </View>
             <View style={[styles.row, { flexWrap: "wrap" }]}>
               {options.map((option) => {
@@ -141,7 +142,12 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
                     disabled={swap.isPending}
                     style={isActive ? styles.chipActive : styles.chip}
                     onPress={() =>
-                      swap.mutate({ provider, accountId: option.id, reloadAgents: true })
+                      swap.mutate({
+                        provider,
+                        accountId: option.id,
+                        scope: "provider",
+                        reloadAgents: true,
+                      })
                     }
                   >
                     <Text style={isActive ? styles.chipTextActive : styles.chipText}>
@@ -166,6 +172,27 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
           </View>
         );
       })}
+
+      {(accounts.data?.bindings ?? []).length > 0 ? (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.heading}>Pinned</Text>
+          <Text style={styles.caption}>
+            Agents and workspaces on their own account. These ignore the fleet default, and a
+            change to it leaves them where they are.
+          </Text>
+        </View>
+      ) : null}
+
+      {(accounts.data?.bindings ?? []).map((binding) => (
+        <View key={`${binding.scope}:${binding.key}:${binding.provider}`} style={styles.card}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.label}>
+              {binding.scope} {binding.key.slice(0, 8)}
+            </Text>
+            <Text style={styles.muted}>{`${binding.provider} → ${binding.accountId}`}</Text>
+          </View>
+        </View>
+      ))}
 
       <View style={{ gap: 4 }}>
         <Text style={styles.heading}>Subscription windows</Text>

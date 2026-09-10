@@ -10,6 +10,7 @@ export interface AgentLike {
   provider: string;
   status: string;
   cwd?: string;
+  workspaceId?: string | null;
   title?: string | null;
   archivedAt?: string | null;
   lastUsage?: {

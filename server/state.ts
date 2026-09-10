@@ -69,7 +69,7 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
 }
 
 function emptyState(): RouterState {
-  return { accounts: [], active: {} };
+  return { accounts: [], active: {}, bindings: [] };
 }
 
 export async function loadState(): Promise<RouterState> {
@@ -102,5 +102,5 @@ export async function loadStateWithDiscovery(): Promise<RouterState> {
   for (const account of discovered) {
     if (!byId.has(account.id)) byId.set(account.id, account);
   }
-  return { accounts: Array.from(byId.values()), active: stored.active };
+  return { accounts: Array.from(byId.values()), active: stored.active, bindings: stored.bindings };
 }
