@@ -132,9 +132,15 @@ State lives at `$PASEO_HOME/obol/state.json` and is written atomically:
       "env": { "CLAUDE_CONFIG_DIR": "/Users/you/.claude-work" }
     }
   ],
-  "active": { "claude": "claude-work" }
+  "active": { "claude": "claude-work" },
+  "bindings": [
+    { "scope": "agent", "key": "<agent-id>", "provider": "claude", "accountId": "claude-personal" }
+  ]
 }
 ```
+
+`active` is the fleet default; `bindings` are the narrower overrides. A file
+written before scoped bindings existed still loads — `bindings` defaults to `[]`.
 
 `provider` is a Paseo provider id, so it also works with a provider profile
 alias from `docs/custom-providers.md`.
@@ -151,12 +157,17 @@ them.
 
 Two limits worth knowing before you read a number off the screen:
 
-- **Windows belong to the daemon's credential context, not to each account.**
-  Paseo's fetchers read `process.env.CODEX_HOME` and friends
-  (`packages/server/src/services/quota-fetcher/providers/codex.ts:87`), which is
-  the daemon's environment, not the per-agent override. So the windows shown are
-  the ones for whichever account is currently bound. Obol labels them that way
-  rather than implying it probed every account.
+- **Windows are not per-account, and for Claude they are not even per-directory.**
+  Paseo's fetchers read the daemon's own environment, not the per-agent override
+  (`quota-fetcher/providers/codex.ts:87`). For Claude it is worse: the fetcher
+  reads `CLAUDE_HOME` — a variable Claude Code does not have — and never
+  `CLAUDE_CONFIG_DIR`, then falls back to an *unscoped* Keychain item. Pointed at
+  an empty directory it still returns the default account's live usage, measured.
+  Claude Code scopes credentials as `Claude Code-credentials-<sha256(dir)[:8]>`;
+  the fetcher never reads the scoped item. Reported upstream on
+  [getpaseo/paseo#3589](https://github.com/getpaseo/paseo/issues/3589). Until it
+  lands, treat the Claude windows as "some account on this machine", not the
+  bound one.
 - **`lastUsage` is one turn.** Paseo exposes the last turn's tokens per agent,
   not a running total, so the totals row is "the sum of everyone's last turn",
   which is what the heading says.
