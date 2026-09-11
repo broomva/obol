@@ -13,7 +13,7 @@ import {
 } from "./ledger";
 import { reloadHint } from "./reload-diagnosis";
 import { planAgentReloads } from "./reload-plan";
-import { findActiveAccount, resolveAccountFor, upsertBinding } from "./routing";
+import { findActiveAccount, historyMirrorEndpoints, upsertBinding } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
 
 const run = promisify(execFile);
@@ -88,12 +88,15 @@ export async function handleSelectAccount(
       if (!agent) continue;
       // Carry the conversation across first: the reopened session resumes by
       // session id, and that id is a file inside the account's config dir.
-      const from = resolveAccountFor(before, {
+      // The *path*, not the launch override: the default account has history on
+      // disk but contributes no env, so reading `env.CLAUDE_CONFIG_DIR` here
+      // would skip the mirror on every swap into or out of default and strand
+      // the conversation ("No conversation found with session ID").
+      const { from, to } = historyMirrorEndpoints(before, account, {
         provider,
         agentId: agent.id,
         workspaceId: agent.workspaceId ?? null,
-      })?.account.env.CLAUDE_CONFIG_DIR;
-      const to = account.env.CLAUDE_CONFIG_DIR;
+      });
       if (from && to && agent.cwd) {
         try {
           await mirrorClaudeHistory({ fromConfigDir: from, toConfigDir: to, cwd: agent.cwd });
