@@ -19,7 +19,13 @@ export function statePath(): string {
 /**
  * Each provider's config-dir variable. Paseo itself reads both, so pointing
  * them at a per-account directory is what makes two subscriptions of the same
- * vendor coexist: the credential store is keyed by the config dir.
+ * vendor coexist.
+ *
+ * The store is keyed by *whether the variable is set*, not only by its value:
+ * with `CLAUDE_CONFIG_DIR` unset Claude Code authenticates from the unscoped
+ * keychain item, and with it set — even to the default path — it authenticates
+ * from `<configDir>/.credentials.json`. Only a non-default account may carry
+ * one of these keys; see `discoverAccounts`.
  */
 const PROVIDER_CONFIG_DIR_ENV: Record<string, string> = {
   claude: "CLAUDE_CONFIG_DIR",
@@ -60,7 +66,15 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
         id: isDefault ? `${provider}-default` : `${provider}-${name.slice(defaultDir.length + 1)}`,
         provider,
         label: isDefault ? `${provider} (default)` : `${provider} (${name.slice(defaultDir.length + 1)})`,
-        env: { [envKey]: join(home, name) },
+        // The default account is the *absence* of an override, so it carries an
+        // empty env. Setting the config-dir variable to the default path is not
+        // a no-op: Claude Code reads `<configDir>/.credentials.json` when the
+        // variable is set and the unscoped keychain item when it is not, so
+        // re-asserting the default path silently moves a session onto a
+        // different credential store (BRO-2518). `routedEnvKeys` still lists the
+        // key because a sibling account owns it, so selecting default *removes*
+        // it rather than leaving the previous account's value behind.
+        env: isDefault ? {} : { [envKey]: join(home, name) },
       });
     }
   }
