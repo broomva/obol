@@ -169,6 +169,9 @@ export function ObolSurface({ theme, layout }: PluginSurfaceProps) {
                   : ""}
               </Text>
             ) : null}
+            {swap.data && swap.data.provider === provider && swap.data.reloadHint ? (
+              <Text style={styles.danger}>{swap.data.reloadHint}</Text>
+            ) : null}
           </View>
         );
       })}

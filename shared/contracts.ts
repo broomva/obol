@@ -85,6 +85,8 @@ export const selectAccount = defineRpc({
     /** Mid-turn agents left alone; they pick the binding up on their next open. */
     deferredAgentIds: z.array(z.string()),
     reloadErrors: z.array(z.object({ agentId: z.string(), error: z.string() })),
+    /** One actionable explanation for the whole swap, not one per agent. */
+    reloadHint: z.string().nullable(),
   }),
 });
 

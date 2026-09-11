@@ -11,6 +11,7 @@ import {
   toLastTurnEntry,
   totalsOf,
 } from "./ledger";
+import { reloadHint } from "./reload-diagnosis";
 import { planAgentReloads } from "./reload-plan";
 import { findActiveAccount, resolveAccountFor, upsertBinding } from "./routing";
 import { loadStateWithDiscovery, saveState, statePath } from "./state";
@@ -118,6 +119,7 @@ export async function handleSelectAccount(
     reloadedAgentIds,
     deferredAgentIds,
     reloadErrors,
+    reloadHint: reloadHint(reloadErrors),
   };
 }
 
