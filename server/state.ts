@@ -75,11 +75,29 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
         // key because a sibling account owns it, so selecting default *removes*
         // it rather than leaving the previous account's value behind.
         env: isDefault ? {} : { [envKey]: join(home, name) },
+        // The path is recorded for every account, default included: history
+        // lives here even when nothing is injected to select it.
+        configDir: join(home, name),
       });
     }
   }
 
   return accounts;
+}
+
+/**
+ * Where an account's files live, for code that must *read or move* them rather
+ * than select them — conversation history above all.
+ *
+ * Falls back to the launch override so state persisted before `configDir`
+ * existed still resolves: those rows carried the path in `env`, including the
+ * default account's, which is exactly the conflation this field undoes.
+ */
+export function accountConfigDir(account: Account | undefined): string | undefined {
+  if (!account) return undefined;
+  if (account.configDir) return account.configDir;
+  const envKey = PROVIDER_CONFIG_DIR_ENV[account.provider];
+  return envKey ? account.env[envKey] : undefined;
 }
 
 function emptyState(): RouterState {
@@ -113,8 +131,13 @@ export async function loadStateWithDiscovery(): Promise<RouterState> {
   const stored = await loadState();
   const discovered = await discoverAccounts();
   const byId = new Map(stored.accounts.map((account) => [account.id, account]));
-  for (const account of discovered) {
-    if (!byId.has(account.id)) byId.set(account.id, account);
-  }
+  // Discovery is authoritative for anything it finds. Accounts are derived from
+  // the filesystem and carry no user-authored fields, so a stored row is only a
+  // cache — and letting the cache win means a row persisted with an older shape
+  // survives forever. That is how a default account persisted with a
+  // `CLAUDE_CONFIG_DIR` in its env would keep injecting it after BRO-2518 was
+  // fixed. Stored rows that discovery no longer finds are still kept, so an
+  // account whose directory is temporarily absent is not silently dropped.
+  for (const account of discovered) byId.set(account.id, account);
   return { accounts: Array.from(byId.values()), active: stored.active, bindings: stored.bindings };
 }

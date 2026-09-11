@@ -1,4 +1,5 @@
 import type { Account, BindingScope, RouterState, ScopedBinding } from "../shared/contracts";
+import { accountConfigDir } from "./state";
 
 /** Everything the router knows about a session that is about to open. */
 export interface SessionContext {
@@ -118,4 +119,24 @@ export function upsertBinding(state: RouterState, binding: ScopedBinding): Route
       ),
   );
   return { ...state, bindings: [...rest, binding] };
+}
+
+/**
+ * The two config dirs a reload must carry a conversation between.
+ *
+ * Deliberately resolves *paths*, never launch overrides: the default account
+ * has history on disk but contributes no env, so composing this from
+ * `account.env[...]` returns undefined for it and the caller skips the mirror on
+ * every swap into or out of default, stranding the session with "No
+ * conversation found with session ID" (BRO-2518).
+ */
+export function historyMirrorEndpoints(
+  before: RouterState,
+  target: Account,
+  context: SessionContext,
+): { from: string | undefined; to: string | undefined } {
+  return {
+    from: accountConfigDir(resolveAccountFor(before, context)?.account),
+    to: accountConfigDir(target),
+  };
 }
