@@ -14,8 +14,23 @@ export const AccountSchema = z.object({
   /** Paseo provider id this account binds to, e.g. "claude" or a profile alias. */
   provider: z.string().min(1),
   label: z.string().min(1),
-  /** Launch environment overrides that select this account's credential store. */
+  /**
+   * Launch environment overrides that select this account's credential store.
+   * Empty for the default account: with no config-dir variable set the provider
+   * falls back to its own default store, and re-asserting that path would pick a
+   * *different* store instead of changing nothing (BRO-2518).
+   */
   env: z.record(z.string(), z.string()),
+  /**
+   * Where this account's config dir actually lives. Distinct from `env`: the
+   * default account has a config dir on disk (`~/.claude`) but must contribute
+   * no launch override. Conversation history is stored under this path, so code
+   * that moves history needs the *path*, while code that opens a session needs
+   * the *env*. Conflating the two is what made the default account inject a
+   * variable it had no business setting. Optional for back-compat with state
+   * persisted before this field existed.
+   */
+  configDir: z.string().optional(),
 });
 export type Account = z.infer<typeof AccountSchema>;
 
