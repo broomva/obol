@@ -60,20 +60,22 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
     if (!envKey) continue;
 
     const sorted = names.slice().sort();
-    // The default directory is claimed FIRST so no sibling can take its id.
-    // `~/.claude-default` derives the suffix "default" and collides with the
-    // real default's id; whichever is emitted last wins the merge map, so a
-    // sibling directory would answer to "claude-default" and route the default
-    // account at a directory instead of the unscoped store (BRO-2518 round 2).
-    const defaultFirst = [...sorted.filter((n) => n === defaultDir), ...sorted.filter((n) => n !== defaultDir)];
     const used = new Set<string>();
+    // `~/.claude-default` derives the suffix "default" and wants the same id as
+    // the real default; whichever is emitted last wins the merge map, so the
+    // sibling would answer to "claude-default" and route the default account at
+    // a directory instead of the unscoped store (BRO-2518 round 2). Reserving
+    // the id up front decides that by rule rather than by iteration order — an
+    // earlier ordering fix was an equivalent mutant, since the default dir is a
+    // strict prefix of every sibling and already sorted first.
+    if (sorted.includes(defaultDir)) used.add(`${provider}-default`);
 
-    for (const name of defaultFirst) {
+    for (const name of sorted) {
       if (name !== defaultDir && !name.startsWith(`${defaultDir}-`)) continue;
       const isDefault = name === defaultDir;
       const suffix = isDefault ? "default" : name.slice(defaultDir.length + 1);
       let id = `${provider}-${suffix}`;
-      if (used.has(id)) {
+      if (!isDefault && used.has(id)) {
         // Deterministic disambiguation. A real directory is never silently
         // dropped, and the reserved default id is never reassigned.
         let n = 2;
