@@ -29,7 +29,9 @@ beforeAll(async () => {
           id: "claude-default",
           provider: "claude",
           label: "claude (default)",
-          env: { CLAUDE_CONFIG_DIR: "/vanished/.claude" },
+          // What a pre-BRO-2518 default row actually looked like: the real
+          // default path, re-asserted as a launch override.
+          env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude") },
         },
       ],
       active: { claude: "claude-default" },
@@ -50,11 +52,23 @@ describe("normalizeAccount", () => {
       id: "claude-default",
       provider: "claude",
       label: "claude (default)",
-      env: { CLAUDE_CONFIG_DIR: "/legacy/.claude" },
+      env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude") },
     });
     expect(out.env).toEqual({});
-    // The path is not lost — it is where that account's history lives.
-    expect(out.configDir).toBe("/legacy/.claude");
+    expect(out.configDir).toBe(join(fake.home, ".claude"));
+  });
+
+  it("does NOT strip a sibling that merely carries the default id", () => {
+    // Round-3 defect: `~/.claude-default` derives the same id. Keying off the id
+    // stripped its override and turned it into a false default.
+    const sibling = {
+      id: "claude-default",
+      provider: "claude",
+      label: "claude (default)",
+      env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude-default") },
+      configDir: join(fake.home, ".claude-default"),
+    };
+    expect(normalizeAccount(sibling)).toEqual(sibling);
   });
 
   it("leaves a non-default account alone", () => {
@@ -62,7 +76,7 @@ describe("normalizeAccount", () => {
       id: "claude-work",
       provider: "claude",
       label: "claude (work)",
-      env: { CLAUDE_CONFIG_DIR: "/home/u/.claude-work" },
+      env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude-work") },
     };
     expect(normalizeAccount(work)).toEqual(work);
   });
@@ -72,30 +86,39 @@ describe("normalizeAccount", () => {
       id: "claude-default",
       provider: "claude",
       label: "claude (default)",
-      env: { CLAUDE_CONFIG_DIR: "/legacy/.claude", CLAUDE_EXTRA: "1" },
+      env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude"), CLAUDE_EXTRA: "1" },
     });
     expect(out.env).toEqual({ CLAUDE_EXTRA: "1" });
   });
 
-  it("does not invent a configDir it was never given", () => {
-    const out = normalizeAccount({
-      id: "codex-default",
-      provider: "codex",
-      label: "codex (default)",
-      env: {},
-    });
-    expect(out.configDir).toBeUndefined();
+  it("does not mutate its input", () => {
+    const input = {
+      id: "claude-default",
+      provider: "claude",
+      label: "claude (default)",
+      env: { CLAUDE_CONFIG_DIR: join(fake.home, ".claude") },
+    };
+    normalizeAccount(input);
+    expect(input.env).toEqual({ CLAUDE_CONFIG_DIR: join(fake.home, ".claude") });
+  });
+
+  it("ignores a provider with no config-dir variable", () => {
+    const odd = {
+      id: "vendorx-default",
+      provider: "vendorx",
+      label: "vendorx (default)",
+      env: { SOMETHING: "1" },
+    };
+    expect(normalizeAccount(odd)).toEqual(odd);
   });
 });
 
 describe("loadStateWithDiscovery with the default directory absent", () => {
   it("still refuses to let a stale default inject its override", async () => {
-    // Discovery finds no `.claude`, so it cannot replace the stored row. Without
-    // normalization that row survives and keeps routing sessions at a dead store.
     const state = await loadStateWithDiscovery();
     const account = state.accounts.find((entry) => entry.id === "claude-default");
     expect(account).toBeDefined();
     expect(account?.env).toEqual({});
-    expect(account?.configDir).toBe("/vanished/.claude");
+    expect(account?.configDir).toBe(join(fake.home, ".claude"));
   });
 });

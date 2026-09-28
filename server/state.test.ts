@@ -163,3 +163,34 @@ describe("discoverAccounts id collisions", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe("discoverAccounts when the default directory is absent", () => {
+  it("does not let a lone sibling take the reserved default id", async () => {
+    // Round-3 defect: with `~/.claude` absent, `~/.claude-default` took the id
+    // `claude-default`, and normalizeAccount then stripped its override, leaving
+    // a "default" account pointing at the unscoped store instead of that dir.
+    // It would also RENAME itself if `~/.claude` later appeared, breaking any
+    // persisted binding that referenced it.
+    const h = await mkdtemp(join(tmpdir(), "obol-nodefault-"));
+    await mkdir(join(h, ".claude-default"), { recursive: true });
+    const list = await discoverAccounts(h);
+
+    const sibling = list.find((a) => a.configDir === join(h, ".claude-default"));
+    expect(sibling).toBeDefined();
+    expect(sibling?.id).not.toBe("claude-default");
+    expect(sibling?.env).toEqual({ CLAUDE_CONFIG_DIR: join(h, ".claude-default") });
+    expect(list.some((a) => a.id === "claude-default")).toBe(false);
+  });
+
+  it("gives that sibling the same id whether or not the default dir exists", async () => {
+    const without = await mkdtemp(join(tmpdir(), "obol-stable-a-"));
+    await mkdir(join(without, ".claude-default"), { recursive: true });
+    const withDefault = await mkdtemp(join(tmpdir(), "obol-stable-b-"));
+    await mkdir(join(withDefault, ".claude-default"), { recursive: true });
+    await mkdir(join(withDefault, ".claude"), { recursive: true });
+
+    const a = (await discoverAccounts(without)).find((x) => x.configDir?.endsWith(".claude-default"));
+    const b = (await discoverAccounts(withDefault)).find((x) => x.configDir?.endsWith(".claude-default"));
+    expect(a?.id).toBe(b?.id);
+  });
+});

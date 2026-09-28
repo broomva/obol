@@ -60,7 +60,13 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
     if (!envKey) continue;
 
     const sorted = names.slice().sort();
-    const used = new Set<string>();
+    // `<provider>-default` is reserved for the default DIRECTORY whether or not it
+    // exists. Without the reservation, a lone `~/.claude-default` takes the id, and
+    // it would then CHANGE if `~/.claude` later appeared — silently breaking any
+    // persisted binding that referenced it. (An earlier reservation was deleted as
+    // an equivalent mutant; it was, for the reason given then. This one is reachable
+    // and is killed by the absent-default-dir test.)
+    const used = new Set<string>([`${provider}-default`]);
     // `~/.claude-default` derives the suffix "default" and wants the same id as
     // the real default; whichever is emitted last wins the merge map, so the
     // sibling would answer to "claude-default" and route the default account at
@@ -172,11 +178,18 @@ export async function saveState(state: RouterState): Promise<void> {
  * keep injecting the key. The path is not thrown away — it becomes `configDir`,
  * which is where that account's history actually lives.
  */
-export function normalizeAccount(account: Account): Account {
+export function normalizeAccount(account: Account, home = homedir()): Account {
   const envKey = PROVIDER_CONFIG_DIR_ENV[account.provider];
-  if (!envKey) return account;
-  if (account.id !== `${account.provider}-default`) return account;
+  const defaultDir = PROVIDER_DEFAULT_DIR[account.provider];
+  if (!envKey || !defaultDir) return account;
   if (!(envKey in account.env)) return account;
+  // Default-ness is a property of the DIRECTORY, never of the id. `~/.claude-default`
+  // derives the id `claude-default` too, and keying this off the id stripped that
+  // sibling's override and turned it into a false default pointing at the unscoped
+  // store (BRO-2518 round 3). Deciding by path is the same lesson as the original
+  // bug: two facts that coincide for the common case are still two facts.
+  const path = account.configDir ?? account.env[envKey];
+  if (path !== join(home, defaultDir)) return account;
   const { [envKey]: legacyPath, ...rest } = account.env;
   return { ...account, env: rest, configDir: account.configDir ?? legacyPath };
 }
@@ -194,7 +207,7 @@ export async function loadStateWithDiscovery(): Promise<RouterState> {
   // account whose directory is temporarily absent is not silently dropped.
   for (const account of discovered) byId.set(account.id, account);
   return {
-    accounts: Array.from(byId.values()).map(normalizeAccount),
+    accounts: Array.from(byId.values()).map((account) => normalizeAccount(account)),
     active: stored.active,
     bindings: stored.bindings,
   };
