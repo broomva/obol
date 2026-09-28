@@ -64,12 +64,14 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
     // `~/.claude-default` derives the suffix "default" and wants the same id as
     // the real default; whichever is emitted last wins the merge map, so the
     // sibling would answer to "claude-default" and route the default account at
-    // a directory instead of the unscoped store (BRO-2518 round 2). Reserving
-    // the id up front decides that by rule rather than by iteration order — an
-    // earlier ordering fix was an equivalent mutant, since the default dir is a
-    // strict prefix of every sibling and already sorted first.
-    if (sorted.includes(defaultDir)) used.add(`${provider}-default`);
-
+    // a directory instead of the unscoped store (BRO-2518 round 2).
+    //
+    // The invariant that prevents it: the default directory takes
+    // `<provider>-default` UNCONDITIONALLY (no collision check), and only a
+    // sibling can be pushed off it. Two earlier attempts to also force the
+    // iteration order were both equivalent mutants and were removed; the
+    // `!isDefault` guard below is the whole of the protection, and it holds
+    // whichever name is visited first.
     for (const name of sorted) {
       if (name !== defaultDir && !name.startsWith(`${defaultDir}-`)) continue;
       const isDefault = name === defaultDir;
