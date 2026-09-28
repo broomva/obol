@@ -1,5 +1,5 @@
 import type { Account, BindingScope, RouterState, ScopedBinding } from "../shared/contracts";
-import { accountConfigDir } from "./state";
+import { accountConfigDir, providerConfigDirEnv } from "./state";
 
 /** Everything the router knows about a session that is about to open. */
 export interface SessionContext {
@@ -16,6 +16,14 @@ export interface SessionContext {
  */
 export function routedEnvKeys(state: RouterState, provider: string): string[] {
   const keys = new Set<string>();
+  // The provider's own config-dir variable is ALWAYS routed, even when no
+  // account advertises it. The default account's env is empty by design, so on
+  // a machine whose only account is the default this set would otherwise be
+  // empty: nothing would be deleted, the env would compare equal, and a
+  // previously-set override would survive "select default" in place — the exact
+  // bug this change exists to remove (BRO-2518 round 2).
+  const canonical = providerConfigDirEnv(provider);
+  if (canonical) keys.add(canonical);
   for (const account of state.accounts) {
     if (account.provider !== provider) continue;
     for (const key of Object.keys(account.env)) keys.add(key);
@@ -135,6 +143,14 @@ export function historyMirrorEndpoints(
   target: Account,
   context: SessionContext,
 ): { from: string | undefined; to: string | undefined } {
+  // Claude only. `mirrorClaudeHistory` ports the Claude SDK's project-dir
+  // encoding and its `projects/<dir>/*.jsonl` layout; a Codex home stores
+  // sessions differently. Before this change the endpoints were read from
+  // `env.CLAUDE_CONFIG_DIR`, which a Codex account never sets, so Codex swaps
+  // skipped the copier by accident. Resolving by path removed that accident, so
+  // the restriction is now stated explicitly — otherwise a Codex swap copies
+  // files it does not understand, and a copy failure blocks the reload.
+  if (context.provider !== "claude") return { from: undefined, to: undefined };
   return {
     from: accountConfigDir(resolveAccountFor(before, context)?.account),
     to: accountConfigDir(target),

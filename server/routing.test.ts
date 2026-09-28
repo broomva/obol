@@ -271,3 +271,47 @@ describe("historyMirrorEndpoints", () => {
     expect(to).toBe("/home/u/.claude-work");
   });
 });
+
+describe("routedEnvKeys routes the canonical key unconditionally", () => {
+  const onlyDefault: RouterState = {
+    accounts: [
+      { id: "claude-default", provider: "claude", label: "claude (default)", env: {}, configDir: "/home/u/.claude" },
+    ],
+    active: { claude: "claude-default" },
+    bindings: [],
+  };
+
+  it("includes the provider key even though no account advertises it", () => {
+    // Derived from accounts alone this set is empty, because the default
+    // account's env is empty by design.
+    expect(routedEnvKeys(onlyDefault, "claude")).toEqual(["CLAUDE_CONFIG_DIR"]);
+  });
+
+  it("strips a stale override when the default is the ONLY account", () => {
+    // The round-2 defect: nothing deleted -> env compares equal -> undefined
+    // returned -> the old store survives "select default".
+    expect(
+      resolveSessionEnv(onlyDefault, { provider: "claude" }, { CLAUDE_CONFIG_DIR: "/old" }),
+    ).toEqual({});
+  });
+
+  it("still returns undefined when there was nothing to strip", () => {
+    expect(resolveSessionEnv(onlyDefault, { provider: "claude" }, {})).toBeUndefined();
+  });
+});
+
+describe("historyMirrorEndpoints is Claude-only", () => {
+  it("returns no endpoints for a codex swap", () => {
+    // mirrorClaudeHistory ports the Claude project-dir layout; running it over
+    // two CODEX_HOMEs copies files it does not understand, and a failure there
+    // blocks the reload.
+    const state: RouterState = {
+      accounts: [WORK, PERSONAL, CODEX],
+      active: { codex: "codex-default" },
+      bindings: [],
+    };
+    const { from, to } = historyMirrorEndpoints(state, CODEX, { provider: "codex" });
+    expect(from).toBeUndefined();
+    expect(to).toBeUndefined();
+  });
+});

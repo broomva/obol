@@ -140,3 +140,26 @@ describe("history survives a swap involving the default account", () => {
     ]);
   });
 });
+
+describe("discoverAccounts id collisions", () => {
+  it("never lets a sibling directory take the default account's id", async () => {
+    const h = await mkdtemp(join(tmpdir(), "obol-collide-"));
+    for (const d of [".claude", ".claude-default", ".claude-work"]) {
+      await mkdir(join(h, d), { recursive: true });
+    }
+    const list = await discoverAccounts(h);
+
+    const def = list.find((a) => a.id === "claude-default");
+    expect(def?.configDir).toBe(join(h, ".claude"));
+    expect(def?.env).toEqual({});
+
+    // The sibling is kept, under a distinct id, and still carries its override.
+    const sibling = list.find((a) => a.configDir === join(h, ".claude-default"));
+    expect(sibling).toBeDefined();
+    expect(sibling?.id).not.toBe("claude-default");
+    expect(sibling?.env).toEqual({ CLAUDE_CONFIG_DIR: join(h, ".claude-default") });
+
+    const ids = list.map((a) => a.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

@@ -59,21 +59,40 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
     const envKey = PROVIDER_CONFIG_DIR_ENV[provider];
     if (!envKey) continue;
 
-    for (const name of names.slice().sort()) {
+    const sorted = names.slice().sort();
+    // The default directory is claimed FIRST so no sibling can take its id.
+    // `~/.claude-default` derives the suffix "default" and collides with the
+    // real default's id; whichever is emitted last wins the merge map, so a
+    // sibling directory would answer to "claude-default" and route the default
+    // account at a directory instead of the unscoped store (BRO-2518 round 2).
+    const defaultFirst = [...sorted.filter((n) => n === defaultDir), ...sorted.filter((n) => n !== defaultDir)];
+    const used = new Set<string>();
+
+    for (const name of defaultFirst) {
       if (name !== defaultDir && !name.startsWith(`${defaultDir}-`)) continue;
       const isDefault = name === defaultDir;
+      const suffix = isDefault ? "default" : name.slice(defaultDir.length + 1);
+      let id = `${provider}-${suffix}`;
+      if (used.has(id)) {
+        // Deterministic disambiguation. A real directory is never silently
+        // dropped, and the reserved default id is never reassigned.
+        let n = 2;
+        while (used.has(`${id}-${n}`)) n += 1;
+        id = `${id}-${n}`;
+      }
+      used.add(id);
       accounts.push({
-        id: isDefault ? `${provider}-default` : `${provider}-${name.slice(defaultDir.length + 1)}`,
+        id,
         provider,
-        label: isDefault ? `${provider} (default)` : `${provider} (${name.slice(defaultDir.length + 1)})`,
+        label: `${provider} (${id.slice(provider.length + 1)})`,
         // The default account is the *absence* of an override, so it carries an
         // empty env. Setting the config-dir variable to the default path is not
         // a no-op: Claude Code reads `<configDir>/.credentials.json` when the
         // variable is set and the unscoped keychain item when it is not, so
         // re-asserting the default path silently moves a session onto a
-        // different credential store (BRO-2518). `routedEnvKeys` still lists the
-        // key because a sibling account owns it, so selecting default *removes*
-        // it rather than leaving the previous account's value behind.
+        // different credential store (BRO-2518). `routedEnvKeys` lists the key
+        // unconditionally for the provider, so selecting default *removes* it
+        // rather than leaving the previous account's value behind.
         env: isDefault ? {} : { [envKey]: join(home, name) },
         // The path is recorded for every account, default included: history
         // lives here even when nothing is injected to select it.
@@ -93,6 +112,18 @@ export async function discoverAccounts(home = homedir()): Promise<Account[]> {
  * existed still resolves: those rows carried the path in `env`, including the
  * default account's, which is exactly the conflation this field undoes.
  */
+/**
+ * The launch variable that selects a config dir for this provider, whether or
+ * not any discovered account advertises it. `routedEnvKeys` needs this
+ * independently of the account list: the default account's env is empty by
+ * design, so on a machine with no sibling directories the routed-key set would
+ * otherwise be empty and a previously-set override would survive "select
+ * default" untouched (BRO-2518 round 2).
+ */
+export function providerConfigDirEnv(provider: string): string | undefined {
+  return PROVIDER_CONFIG_DIR_ENV[provider];
+}
+
 export function accountConfigDir(account: Account | undefined): string | undefined {
   if (!account) return undefined;
   if (account.configDir) return account.configDir;
@@ -127,6 +158,25 @@ export async function saveState(state: RouterState): Promise<void> {
  * Merges discovered accounts into the stored state without ever overwriting a
  * binding the user chose. Discovery adds rows; only `selectAccount` binds one.
  */
+/**
+ * Force the invariant on a row no matter where it came from: the provider
+ * default never carries a config-dir override.
+ *
+ * Discovery already builds it that way, but a row persisted before BRO-2518
+ * carries the override, and discovery only replaces rows whose directory it can
+ * still see. With `~/.claude` temporarily absent the stale row would survive and
+ * keep injecting the key. The path is not thrown away — it becomes `configDir`,
+ * which is where that account's history actually lives.
+ */
+export function normalizeAccount(account: Account): Account {
+  const envKey = PROVIDER_CONFIG_DIR_ENV[account.provider];
+  if (!envKey) return account;
+  if (account.id !== `${account.provider}-default`) return account;
+  if (!(envKey in account.env)) return account;
+  const { [envKey]: legacyPath, ...rest } = account.env;
+  return { ...account, env: rest, configDir: account.configDir ?? legacyPath };
+}
+
 export async function loadStateWithDiscovery(): Promise<RouterState> {
   const stored = await loadState();
   const discovered = await discoverAccounts();
@@ -139,5 +189,9 @@ export async function loadStateWithDiscovery(): Promise<RouterState> {
   // fixed. Stored rows that discovery no longer finds are still kept, so an
   // account whose directory is temporarily absent is not silently dropped.
   for (const account of discovered) byId.set(account.id, account);
-  return { accounts: Array.from(byId.values()), active: stored.active, bindings: stored.bindings };
+  return {
+    accounts: Array.from(byId.values()).map(normalizeAccount),
+    active: stored.active,
+    bindings: stored.bindings,
+  };
 }
