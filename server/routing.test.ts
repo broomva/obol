@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RouterState, ScopedBinding } from "../shared/contracts";
 import {
   findActiveAccount,
+  historyMirrorEndpoints,
   resolveAccountFor,
   resolveSessionEnv,
   routedEnvKeys,
@@ -214,5 +215,103 @@ describe("upsertBinding", () => {
     const s = state({}, []);
     upsertBinding(s, { scope: "agent", key: "a1", provider: "claude", accountId: "claude-work" });
     expect(s.bindings).toEqual([]);
+  });
+});
+
+describe("historyMirrorEndpoints", () => {
+  const DEFAULT_ACCOUNT = {
+    id: "claude-default",
+    provider: "claude",
+    label: "claude (default)",
+    env: {},
+    configDir: "/home/u/.claude",
+  };
+  const withDefault = (
+    active: Record<string, string>,
+    bindings: ScopedBinding[] = [],
+  ): RouterState => ({ accounts: [WORK, PERSONAL, CODEX, DEFAULT_ACCOUNT], active, bindings });
+
+  it("resolves both endpoints when swapping AWAY from the default account", () => {
+    // The regression: composing these from `account.env` leaves `from`
+    // undefined here, so the caller skips the mirror and the reopened session
+    // cannot find its conversation.
+    const { from, to } = historyMirrorEndpoints(
+      withDefault({ claude: "claude-default" }),
+      WORK,
+      { provider: "claude" },
+    );
+    expect(from).toBe("/home/u/.claude");
+    expect(to).toBe("/home/u/.claude-work");
+  });
+
+  it("resolves both endpoints when swapping INTO the default account", () => {
+    const { from, to } = historyMirrorEndpoints(
+      withDefault({ claude: "claude-work" }),
+      DEFAULT_ACCOUNT,
+      { provider: "claude" },
+    );
+    expect(from).toBe("/home/u/.claude-work");
+    expect(to).toBe("/home/u/.claude");
+  });
+
+  it("honours the most specific binding when choosing the source", () => {
+    const { from } = historyMirrorEndpoints(
+      withDefault({ claude: "claude-default" }, [
+        { scope: "agent", key: "a1", provider: "claude", accountId: "claude-personal" },
+      ]),
+      WORK,
+      { provider: "claude", agentId: "a1" },
+    );
+    expect(from).toBe("/home/u/.claude-personal");
+  });
+
+  it("leaves the source undefined when nothing was bound before", () => {
+    const { from, to } = historyMirrorEndpoints(withDefault({}), WORK, { provider: "claude" });
+    expect(from).toBeUndefined();
+    expect(to).toBe("/home/u/.claude-work");
+  });
+});
+
+describe("routedEnvKeys routes the canonical key unconditionally", () => {
+  const onlyDefault: RouterState = {
+    accounts: [
+      { id: "claude-default", provider: "claude", label: "claude (default)", env: {}, configDir: "/home/u/.claude" },
+    ],
+    active: { claude: "claude-default" },
+    bindings: [],
+  };
+
+  it("includes the provider key even though no account advertises it", () => {
+    // Derived from accounts alone this set is empty, because the default
+    // account's env is empty by design.
+    expect(routedEnvKeys(onlyDefault, "claude")).toEqual(["CLAUDE_CONFIG_DIR"]);
+  });
+
+  it("strips a stale override when the default is the ONLY account", () => {
+    // The round-2 defect: nothing deleted -> env compares equal -> undefined
+    // returned -> the old store survives "select default".
+    expect(
+      resolveSessionEnv(onlyDefault, { provider: "claude" }, { CLAUDE_CONFIG_DIR: "/old" }),
+    ).toEqual({});
+  });
+
+  it("still returns undefined when there was nothing to strip", () => {
+    expect(resolveSessionEnv(onlyDefault, { provider: "claude" }, {})).toBeUndefined();
+  });
+});
+
+describe("historyMirrorEndpoints is Claude-only", () => {
+  it("returns no endpoints for a codex swap", () => {
+    // mirrorClaudeHistory ports the Claude project-dir layout; running it over
+    // two CODEX_HOMEs copies files it does not understand, and a failure there
+    // blocks the reload.
+    const state: RouterState = {
+      accounts: [WORK, PERSONAL, CODEX],
+      active: { codex: "codex-default" },
+      bindings: [],
+    };
+    const { from, to } = historyMirrorEndpoints(state, CODEX, { provider: "codex" });
+    expect(from).toBeUndefined();
+    expect(to).toBeUndefined();
   });
 });
